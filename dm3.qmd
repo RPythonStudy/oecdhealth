@@ -1,0 +1,579 @@
+---
+title: "Data manipulation 3"
+author: "Haewon Lee"
+format: html
+editor: visual
+---
+
+# Health Status
+
+## Data load
+
+tidyverse, dplyr, magrittr 등을 사용합니다.
+
+작업할 파일들을 프로젝터 폴더에 다운로드 한 다음 시작해 주세요
+
+```{r}
+library(tidyverse)
+library(dplyr)
+library(magrittr)
+load("hstatus.Rda")
+## load 명령이 훨씬 더 빠르고 용량도 적게 차지 한다. (6.3MB)
+checkvar <- function(df=status){
+  for (i in 1:length(df)) {         ## df의 변수갯수에 맞춰서
+    if(length(unique(df[,i]))>1){   ## unique value 두개이상인 것 선택
+      cat(i,")", length(unique(df[,i]))," ",colnames(df)[i],"\n") 
+      ### i) unique value 갯수  name of variable 츨력하기 
+    }
+}
+}
+checkvar2 <- function(df=status){
+  for (i in 1:length(df)) {               ## df의 변수갯수에 맞춰서
+    if(length(unique(df[,i]))==1&&        ## unique value가 1개이고
+       !( is.na(unique(df[,i]))||          ## unique value가 NA가 아니거나
+         unique(df[,i]=="Not applicable")||  ## "Not applicable" 이거나
+         unique(df[,i]=="_Z") ))              ## "_Z" 이거나 하지 않으면..   
+      {
+      cat(i,")", colnames(df)[i],":",unique(df[,i]),"\n")
+      ## i 번째 컬럼이름 :  unique value
+    }
+  }
+}
+checkvar(status)
+```
+
+### Preventable mortality
+
+이번에는 Preventable mortality 만 선택해서 변수들을 살펴보자
+
+```{r}
+status_Pm <- status[status$Measure=="Preventable mortality"&
+                      status$Sex=="Total"&
+                      status$Unit.of.measure=="Deaths per 100 000 inhabitants",]
+checkvar(status_Pm)
+checkvar2(status_Pm)
+status_Pm$Observation.status %>% unique
+status_Pm[,c("Reference.area","Observation.status")] %>% table
+```
+
+Avoidable mortality와 마찬가지로 Sex는 Total로 정하고, (Male, Female 구분할 필요가 있으면 별도로 분석) Unit of measure는 인구 10만명당 비율로 정하기로 하였다. Observation.status는 Turkiye 에서만 Definition 이 달라서 차이가 나지만 큰 상관이 없어서 무시할 수 있다.
+
+TIME_PERIOD는 2000\~2021년까지 있는데 국가별로 중간에 데이터가 없는 연도도 있다. 한국의 경우 2021년 데이터가 없기 때문에 2000,2005,2010,2015,2020 이렇게 5개연도를 선택하여 데이터가 전부 다 있는 국가들만 선택한다.
+
+```{r}
+## 국가별로 연도가 빠진 것이 있는지 check
+status_Pm %>% .[,c("Reference.area","TIME_PERIOD")] %>% table %>%
+  as.data.frame %>% .[.$Freq>0,"TIME_PERIOD"] %>% table
+### 똑같은 작업인데 국가를 Korea로 제한해서 테이블을 만들어본다
+status_Pm %>% .[.$Reference.area=="Korea",c("Reference.area","TIME_PERIOD")] %>%
+  table %>% as.data.frame %>% .[.$Freq>0,"TIME_PERIOD"] %>% table 
+
+2001 %>% seq(,by=5, length.out = 5) -> seq.year   ## 5년 간격으로 5개 연도
+status_Pm %>% .[.$TIME_PERIOD %in% seq.year, ] %>%
+  ## 특정연도에 포함된 데이터만 선택
+  .[,c("TIME_PERIOD","Reference.area")] %>% table %>% 
+  ## 연도별, 국가별 테이블을 만들어서
+  as.data.frame %>% .[.$Freq==0,] %>% 
+  ## 빈도가 0인 것만 선택하고
+  ## 이 중에서 Reference.area 값을 제외데이터로 결정
+  .[,"Reference.area"] %>% unique -> excluded
+
+### 이제는 세가지 필드만 사용하면 된다.
+status_Pm <- status_Pm[,c("Reference.area","TIME_PERIOD","OBS_VALUE")]
+status_Pm %>% .[.$TIME_PERIOD %in% seq.year, ] %>%
+  ### 선택된 연도만 포함하고
+  ### excluded에 포함된 국가는 제외
+  .[!.$Reference.area %in% excluded,] -> status_Pm
+
+### TIME_PERIOD 순서대로 wide form data로 변환한 것을 그래프용 매트릭스로 사용
+status_Pm %>% spread(key=TIME_PERIOD, value = OBS_VALUE) -> mat_Pm
+### ncol(.) = last column number
+## 마지막 컬럼의 데이터의 역순 (큰 숫자에서 작은 숫자 순서대로) 정렬
+mat_Pm %>% .[order(-.[,ncol(.)]),] -> mat_Pm
+## mat_Pm %>% .[,-1] %>% as.matrix %>% t 
+## first column 제외한 다음 transpose
+mat_Pm %>% .[,-1] %>% as.matrix %>% t -> matval
+## mat_Am$Reference.area
+colnames(matval) <- mat_Pm$Reference.area
+matval %>% t
+```
+
+```{r}
+#| fig-width: 8
+#| fig-height: 12
+par(mar=c(4,8,4,2)+0.1)  ## lefr margin = 8 
+palette.bar <- rainbow(20)[2:6]
+matval %>% barplot(,beside = T,col=palette.bar,horiz = T, las=1,
+                   main = "Preventable mortality /100,000",
+                   xlim=c(0,500),
+                   axes = TRUE,
+#                   args.legend = list(x="topright"),
+                   legend.text = seq.year )  -> plotdata  ## 그래프의 좌표값
+axTicks(1) %>% length()-1 -> xtick
+grid(nx=NULL, ny=NA,col=rainbow(xtick+3)[(xtick):1])
+#abline(v=c(100,200,300,400,500,600), lty=3,col=rainbow(10)[7:1])
+box()
+matval %>% barplot(,beside = T,col=palette.bar,horiz = T, las=1,
+                   main = "Preventable mortality /100,000",
+                   xlim=c(0,500),
+                   add = TRUE,  ## 새로그리지 않고 기존의 그래프에 덧그리기
+#                   args.legend = list(x="topright"),
+                   legend.text = seq.year )
+xaxis <- as.numeric(plotdata)  ## 매트릭스 값을 1차원 벡터로 수정
+yaxis <- as.numeric(matval)    ## 매트릭스 값을 1차원 벡터로 수정
+## pos option : a position specifier for the text 
+## 1,2,3,4 = below, to the left of, above and to the right
+## cex = numeric character expansion factor  1= default size
+text(yaxis, xaxis, labels=yaxis, pos = 4, cex=0.7, col="darkblue")
+```
+
+### Treatable mortality
+
+이번에는 Treatable mortality 만 선택해서 변수들을 살펴보자
+
+```{r}
+status_Tm <- status[status$Measure=="Treatable mortality"&
+                      status$Sex=="Total"&
+                      status$Unit.of.measure=="Deaths per 100 000 inhabitants",]
+checkvar(status_Tm)
+checkvar2(status_Tm)
+## status_Tm %>% .$Observation.status %>% unique
+## status_Tm %>% .[,c("Reference.area","Observation.status")] %>% table
+```
+
+```{r}
+## 국가별로 연도가 빠진 것이 있는지 check
+status_Tm %>% .[,c("Reference.area","TIME_PERIOD")] %>% table %>%
+  as.data.frame %>% .[.$Freq>0,"TIME_PERIOD"] %>% table
+### 똑같은 작업인데 국가를 Korea로 제한해서 테이블을 만들어본다
+status_Tm %>% .[.$Reference.area=="Korea",c("Reference.area","TIME_PERIOD")] %>%
+  table %>% as.data.frame %>% .[.$Freq>0,"TIME_PERIOD"] %>% table 
+
+2001 %>% seq(,by=5, length.out = 5) -> seq.year   ## 5년 간격으로 5개 연도
+status_Tm %>% .[.$TIME_PERIOD %in% seq.year, ] %>%
+  ## 특정연도에 포함된 데이터만 선택
+  .[,c("TIME_PERIOD","Reference.area")] %>% table %>% 
+  ## 연도별, 국가별 테이블을 만들어서
+  as.data.frame %>% .[.$Freq==0,] %>% 
+  ## 빈도가 0인 것만 선택하고
+  ## 이 중에서 Reference.area 값을 제외데이터로 결정
+  .[,"Reference.area"] %>% unique -> excluded
+
+### 이제는 세가지 필드만 사용하면 된다.
+status_Tm %>% .[,c("Reference.area","TIME_PERIOD","OBS_VALUE")] -> status_Tm
+status_Tm %>% .[.$TIME_PERIOD %in% seq.year, ] %>%
+  ### 선택된 연도만 포함하고
+  ### excluded에 포함된 국가는 제외
+  .[!.$Reference.area %in% excluded,] -> status_Tm
+
+### TIME_PERIOD 순서대로 wide form data로 변환한 것을 그래프용 매트릭스로 사용
+status_Tm %>% spread(key=TIME_PERIOD, value = OBS_VALUE) -> mat_Tm
+### ncol(.) = last column number
+## 마지막 컬럼의 데이터의 역순 (큰 숫자에서 작은 숫자 순서대로) 정렬
+mat_Tm %>% .[order(-.[,ncol(.)]),] -> mat_Tm
+## mat_Pm %>% .[,-1] %>% as.matrix %>% t 
+## first column 제외한 다음 transpose
+mat_Tm %>% .[,-1] %>% as.matrix %>% t -> matval
+## mat_Am$Reference.area
+colnames(matval) <- mat_Tm$Reference.area
+matval %>% t
+```
+
+```{r}
+#| fig-width: 8
+#| fig-height: 12
+par(mar=c(4,8,4,2)+0.1)  ## lefr margin = 8 
+palette.bar <- rainbow(20)[2:6]
+matval %>% barplot(,beside = T,col=palette.bar,horiz = T, las=1,
+                   main = "Treatable mortality /100,000",
+                   xlim=c(0,300),
+                   axes = TRUE,
+#                   args.legend = list(x="topright"),
+                   legend.text = seq.year )  -> plotdata  ## 그래프의 좌표값
+axTicks(1) %>% length()-1 -> xtick
+grid(nx=NULL, ny=NA,col=rainbow(xtick+3)[(xtick):1])
+#abline(v=c(100,200,300,400,500,600), lty=3,col=rainbow(10)[7:1])
+box()
+matval %>% barplot(,beside = T,col=palette.bar,horiz = T, las=1,
+                   main = "Treatable mortality /100,000",
+                   xlim=c(0,300),
+                   add = TRUE,  ## 새로그리지 않고 기존의 그래프에 덧그리기
+#                   args.legend = list(x="topright"),
+                   legend.text = seq.year )
+xaxis <- as.numeric(plotdata)  ## 매트릭스 값을 1차원 벡터로 수정
+yaxis <- as.numeric(matval)    ## 매트릭스 값을 1차원 벡터로 수정
+## pos option : a position specifier for the text 
+## 1,2,3,4 = below, to the left of, above and to the right
+## cex = numeric character expansion factor  1= default size
+text(yaxis, xaxis, labels=yaxis, pos = 4, cex=0.7, col="darkblue")
+```
+
+### Perceived health status
+
+Perceived health status 에 대한 변수들을 살펴보자
+
+```{r}
+mtitle <- "Perceived health status"
+status %>% .[status$Measure==mtitle &
+                       status$Sex=="Total",] -> status_m
+status_m %>% checkvar
+status_m %>% checkvar2
+status_m %>% .[,"Observation.status"] %>% unique
+status_m %>% .[,c("SOCIO_ECON_STATUS","HEALTH_STATUS") ] %>% table
+status_m %>% .[,c("Socio.economic.status","SOCIO_ECON_STATUS") ] %>% table
+status_m %>% .[,c("Health.status","HEALTH_STATUS") ] %>% table
+status_m %>% .[,c("Health.status","REF_AREA") ] %>% table
+status_m %>% .[,c("TIME_PERIOD","SOCIO_ECON_STATUS") ] %>% table
+status_m %>% .[,c("REF_AREA","SOCIO_ECON_STATUS") ] %>% table
+status_m %>% .[,c("Age","HEALTH_STATUS") ] %>% table
+status_m %>% .[,c("Age","SOCIO_ECON_STATUS") ] %>% table
+```
+
+이 부분은 연령대 구분이 문제. 연령별로 세분하면 좋을 것 같지만 전체적인 것만 평균적으로 보기 위해서 한국을 대상으로, 연령은 15 years or over로 한정하도록 해서 데이터를 탐색해 본다.
+
+```{r}
+status_m %>% .[.$Age =="15 years or over"&
+                 .$REF_AREA=="KOR",]  %>%
+  .[,c("TIME_PERIOD","HEALTH_STATUS","SOCIO_ECON_STATUS") ] %>% table
+## temp_m <- status_m[status_m$Age=="15 years or over"&
+##                       status_m$REF_AREA=="KOR",]
+## temp_m[,c("TIME_PERIOD","HEALTH_STATUS","SOCIO_ECON_STATUS") ] %>% table
+```
+
+health status가 good 인 경우의 데이터는 어떤 상태인지 확인해보자
+
+```{r}
+status_m %>% .[.$Age =="15 years or over"&
+                 .$REF_AREA=="KOR"&
+                 .$HEALTH_STATUS=="G",]  %>%
+  .[,c("TIME_PERIOD","SOCIO_ECON_STATUS","OBS_VALUE") ] %>% 
+  spread(key=SOCIO_ECON_STATUS, value = OBS_VALUE)
+```
+
+Socio.economic.status 는 Not applicable 한가지로 통일해도 좋을 것 같다.
+
+```{r}
+status_m %>% .[.$Age =="15 years or over"&
+                 .$SOCIO_ECON_STATUS=="_Z"&
+                 .$HEALTH_STATUS=="G",] -> status_m
+```
+
+```{r}
+status_m %>% .[,c("Reference.area","TIME_PERIOD")] %>% table %>%
+  as.data.frame %>% .[.$Freq>0,"TIME_PERIOD"] %>% table
+### 똑같은 작업인데 국가를 Korea로 제한해서 테이블을 만들어본다
+status_m %>% .[.$Reference.area=="Korea",c("Reference.area","TIME_PERIOD")] %>%
+  table %>% as.data.frame %>% .[.$Freq>0,"TIME_PERIOD"] %>% table 
+```
+
+이번에는 연도를 2006 에서 4년 간격으로 5개 연도를 하는 것이 좋겠다.
+
+```{r}
+## 2022년이 마지막 연도가 되면서 4년 간격으로 5개 연도
+2022 %>% seq(to=.,by=4, length.out = 5) -> seq.year   
+status_m %>% .[.$TIME_PERIOD %in% seq.year, ] %>%
+  ## 특정연도에 포함된 데이터만 선택
+  .[,c("TIME_PERIOD","Reference.area")] %>% table %>% 
+  ## 연도별, 국가별 테이블을 만들어서
+  as.data.frame %>% .[.$Freq==0,] %>% 
+  ## 빈도가 0인 것만 선택하고
+  ## 이 중에서 Reference.area 값을 제외데이터로 결정
+  .[,"Reference.area"] %>% unique -> excluded
+
+### 이제는 세가지 필드만 사용하면 된다.
+status_m %>% .[,c("Reference.area","TIME_PERIOD","OBS_VALUE")] -> status_m
+status_m %>% .[.$TIME_PERIOD %in% seq.year, ] %>%
+  ### 선택된 연도만 포함하고
+  ### excluded에 포함된 국가는 제외
+  .[!.$Reference.area %in% excluded,] -> status_m
+
+### TIME_PERIOD 순서대로 wide form data로 변환한 것을 그래프용 매트릭스로 사용
+status_m %>% spread(key=TIME_PERIOD, value = OBS_VALUE) -> mat_m
+### ncol(.) = last column number
+## 마지막 컬럼의 데이터 정렬 : 이번에는 높을수록 좋은 것
+mat_m %>% .[order(.[,ncol(.)]),] -> mat_m
+## mat_Pm %>% .[,-1] %>% as.matrix %>% t 
+## first column 제외한 다음 transpose
+mat_m %>% .[,-1] %>% as.matrix %>% t -> matval
+## mat_Am$Reference.area
+colnames(matval) <- mat_m$Reference.area
+matval %>% t
+```
+
+```{r}
+#| fig-width: 8
+#| fig-height: 12
+par(mar=c(4,8,4,2)+0.1)  ## lefr margin = 8 
+palette.bar <- rainbow(20)[2:6]
+matval %>% barplot(,beside = T,col=palette.bar,horiz = T, las=1,
+                   main = paste(mtitle,"% of Good"),
+                   xlim=c(0,120),
+                   axes = TRUE,
+#                   args.legend = list(x="topright"),
+                   legend.text = seq.year )  -> plotdata  ## 그래프의 좌표값
+axTicks(1) %>% length()-1 -> xtick
+grid(nx=NULL, ny=NA,col=rainbow(xtick+3)[(xtick):1])
+box()
+matval %>% barplot(,beside = T,col=palette.bar,horiz = T, las=1,
+                   main = paste(mtitle,"% of Good"),
+                   xlim=c(0,120),
+                   add = TRUE,  ## 새로그리지 않고 기존의 그래프에 덧그리기
+#                   args.legend = list(x="topright"),
+                   legend.text = seq.year )
+xaxis <- as.numeric(plotdata)  ## 매트릭스 값을 1차원 벡터로 수정
+yaxis <- as.numeric(matval)    ## 매트릭스 값을 1차원 벡터로 수정
+## pos option : a position specifier for the text 
+## 1,2,3,4 = below, to the left of, above and to the right
+## cex = numeric character expansion factor  1= default size
+text(yaxis, xaxis, labels=paste(yaxis,"%"), pos = 4, cex=0.7, col="darkblue")
+```
+
+## Key functions for transformation
+
+### spread
+
+old version of tidyr pivot function
+
+``` r
+spread(data, key, value, fill = NA, convert = FALSE, drop = TRUE, sep = NULL)
+key    ## Columns to use for key
+value  ## Columns to use for value
+drop   ## drop factor levels that don't appear in the data 
+```
+
+### pivot_wider
+
+new version
+
+``` r
+pivot_wider(
+  data,
+  ...,
+  id_cols = NULL,
+  id_expand = FALSE,
+  names_from = name,
+  names_prefix = "",
+  names_sep = "_",
+  names_glue = NULL,
+  names_sort = FALSE,
+  names_vary = "fastest",
+  names_expand = FALSE,
+  names_repair = "check_unique",
+  values_from = value,
+  values_fill = NULL,
+  values_fn = NULL,
+  unused_fn = NULL
+)
+## names_from  : key 
+## values_from : value
+## values_fn : key column이 단일하지 않은 경우 value가 여러개가 됨 
+## 이때 mean 같은 함수로 문제 해결가능
+## values_fn에 사용가능한 함수들 :
+## mean, sum, length, paste,  toString(문자열로 변환), first, last, median, min, max
+```
+
+```{r}
+library(tidyverse)
+
+grades <- data.frame(
+  name = c("Tom", "Tom", "Tom", "Anna", "Anna", "Lucy"),
+  subject = c("Math", "Math", "Science", "Math", "Science", "Math"),
+  score = c(90, 95, 85, 100, 92, 88)
+)
+
+grades
+
+grades %>%
+  pivot_wider(
+    names_from = subject,
+    values_from = score,
+    values_fn = list(score = mean),        # 평균으로 요약
+    values_fill = list(score = 0)          # NA 대신 0으로 채움
+  )
+
+data1 <- data.frame(
+  user = c("A", "A", "B", "C", "C", "C"),
+  action = c("login", "login", "logout", "login", "logout", "logout")
+)
+data1
+data1 %>%
+  pivot_wider(
+    names_from = action,
+    values_from = action,
+    values_fn = length,                  # 개수 세기
+    values_fill = 0                      # NA → 0
+  )
+```
+
+## Making PYLL function
+
+### Potential years of life lost
+
+Potential years of life lost 항목에 대해서 변수를 조사해 보자
+
+```{r}
+status %>% .[ .$Measure=="Potential years of life lost" &
+                status$Sex=="Total",] -> status_Pl
+checkvar(status_Pl)
+checkvar2(status_Pl)
+status_Pl$Cause.of.death %>% unique
+status_Pl$Cause.of.death %>% unique -> list.cod
+```
+
+Cause.of.death 에 의하여 분류가 되어 있다. Cause.of.death를 Total로 하여 진행해본다.
+
+```{r}
+cod <- "Total"  ## Cause.of.death = list.cod[26]
+status %>% .[ .$Measure=="Potential years of life lost" &
+              .$Sex=="Total" &
+              .$Cause.of.death== cod,] -> status_Pl
+
+PYLLmat <- function(cod="Total", sex="Total", 
+                    seq.year = c(2000,2005,2010,2015,2020)){
+  status %>%  .[ .$Measure=="Potential years of life lost" &
+                   .$Sex== sex &
+                   .$Cause.of.death== cod,] -> PL
+  PL %>% .[.$TIME_PERIOD %in% seq.year, 
+           c("TIME_PERIOD","Reference.area")] %>% table %>%
+    as.data.frame %>% .[.$Freq==0,"Reference.area" ] -> excluded
+  PL %>% .[,c("Reference.area","TIME_PERIOD","OBS_VALUE")] %>%
+    .[.$TIME_PERIOD %in% seq.year,] %>%
+    .[!.$Reference.area %in% excluded,] -> PL
+  PL %>% spread(key=TIME_PERIOD, value = OBS_VALUE) -> mat_PL
+  mat_PL %>% .[order(-.[,ncol(.)]),] -> mat_PL ## 마지막년도 낮은 순서대로 정렬
+  mat_PL[,-1] %>% as.matrix %>% t -> mat
+  colnames(mat) <- mat_PL$Reference.area
+  rownames(mat) <- colnames(mat_PL)[-1]
+  attr(mat,"cod") = cod
+  return(mat)
+}
+PYLLmat(cod="Accidents") %>% t
+PYLLmat(cod="Codes for special purposes: COVID-19") %>% t
+PYLLmat(cod="Codes for special purposes: COVID-19") %>% attr("cod")
+```
+
+이제 barplot 그래프를 그리는 함수를 만들어보자
+
+```{r}
+#| fig-width: 8
+#| fig-height: 12
+matval <- PYLLmat(cod="Accidents")
+seq.year <- rownames(matval)
+mtitle <- paste("PYLL by", attr(matval,"cod"))
+par(mar=c(4,8,4,2)+0.1)  ## lefr margin = 8 
+palette.bar <- rainbow(20)[2:6]
+x.max <- function(x){
+  return(ceiling(x / 10^round(log10(x)-1)) * 10^round(log10(x)-1))  
+}
+matval %>% barplot(,beside = T,col=palette.bar,horiz = T, las=1,
+                   main = paste(mtitle," /100,000"),
+                   xlim=c(0,x.max(max(matval))),
+#                   args.legend = list(x="topright"),
+                   legend.text = seq.year )  -> plotdata  ## 그래프의 좌표값
+axTicks(1) %>% length()-1 -> xtick
+grid(nx=NULL, ny=NA,col=rainbow(xtick+3)[(xtick):1])
+box()
+matval %>% barplot(,beside = T,col=palette.bar,horiz = T, las=1,
+                   main = paste(mtitle," /100,000"),
+                   xlim=c(0,x.max(max(matval))),
+                   add = TRUE,  ## 새로그리지 않고 기존의 그래프에 덧그리기
+#                   args.legend = list(x="topright"),
+                   legend.text = seq.year )
+xaxis <- as.numeric(plotdata)  ## 매트릭스 값을 1차원 벡터로 수정
+yaxis <- as.numeric(matval)    ## 매트릭스 값을 1차원 벡터로 수정
+## pos option : a position specifier for the text 
+## 1,2,3,4 = below, to the left of, above and to the right
+## cex = numeric character expansion factor  1= default size
+text(yaxis, xaxis, labels=yaxis, pos = 4, cex=0.7, col="darkblue")
+
+```
+
+```{r}
+#| fig-width: 8
+#| fig-height: 12
+### 함수 정의 
+PYLLplot <- function(matval=PYLLmat(cod="Total")){
+  seq.year <- rownames(matval)
+  mtitle <- paste("PYLL by", attr(matval,"cod"))
+  par(mar=c(4,8,4,2)+0.1)  ## lefr margin = 8 
+  palette.bar <- rainbow(20)[2:(1+nrow(matval))]
+  x.max <- function(x){
+  return(ceiling(x / 10^round(log10(x)-1)) * 10^round(log10(x)-1))  
+  }
+  
+  matval %>% barplot(,beside = T,col=palette.bar,horiz = T, las=1,
+                   main = paste(mtitle," /100,000"),
+                   xlim=c(0,x.max(max(matval)*1.1)),
+                   #args.legend = list(x="topright"),
+                   legend.text = seq.year )  -> plotdata
+  axTicks(1) %>% length()-1 -> xtick
+  grid(nx=NULL, ny=NA,col=rainbow(xtick+3)[(xtick):1])
+  box()
+  matval %>% barplot(,beside = T,col=palette.bar,horiz = T, las=1,
+                   main = paste(mtitle," /100,000"),
+                   # xlim=c(0,x.max(max(matval)*1.1)),
+                   add = TRUE,  ## 덧그리기
+                   #args.legend = list(x="topright"),
+                   legend.text = seq.year )
+  xaxis <- as.numeric(plotdata)
+  yaxis <- as.numeric(matval)
+  text(yaxis, xaxis, labels=yaxis, pos = 4, cex=0.7, col="darkblue")
+}
+2021 %>% seq(to=.,by=4, length.out = 5) -> seq.year
+PYLLplot(PYLLmat(cod="Accidents",seq.year = seq.year))
+PYLLplot(PYLLmat(cod=list.cod[1],seq.year = seq.year))
+PYLLplot(PYLLmat(cod=list.cod[4],seq.year = seq.year))
+PYLLplot(PYLLmat(cod=list.cod[33],seq.year = seq.year))
+PYLLplot(PYLLmat(cod=list.cod[34],seq.year = seq.year))
+```
+
+Title 길이가 길어서 한 그림에 잘 안나온다.
+
+title와 mtext 함수를 써서 title + subtitle 형식으로 넣도록 하자
+
+```{r}
+#| fig-width: 8
+#| fig-height: 12
+### 함수 정의 
+PYLLplot <- function(matval=PYLLmat(cod="Total")){
+  seq.year <- rownames(matval)
+  subtitle <- paste("By ", attr(matval,"cod"))
+  par(mar=c(4,8,4,2)+0.1)  ## lefr margin = 8 
+  palette.bar <- rainbow(20)[2:(1+nrow(matval))]
+  x.max <- function(x){
+  return(ceiling(x / 10^round(log10(x)-1)) * 10^round(log10(x)-1))  
+  }
+  matval %>% colnames -> country
+  which(country=="Korea") -> pos.korea
+  matval %>% barplot(,beside = T,col=palette.bar,horiz = T, las=1,
+                   #main = "Potential years of life lost /100,000",
+                   #sub = subtitle,
+                   xlim=c(0,x.max(max(matval)*1.1)),
+                   #args.legend = list(x="topright"),
+                   legend.text = seq.year )  -> plotdata
+  title(main="Potential years of life lost /100,000", cex.main=1.5)
+  mtext(subtitle, cex=1.1, col = "darkblue")
+  axTicks(1) %>% length()-1 -> xtick
+  grid(nx=NULL, ny=NA,col=rainbow(xtick+3)[(xtick):1])
+  r1 <- plotdata[1,pos.korea]-1
+  r2 <- plotdata[nrow(plotdata),pos.korea]+1
+  rect(0,r1,x.max(max(matval)*1.1),r2, border = NA,
+       col= alpha("yellow",0.3))
+  matval %>% barplot(,beside = T,col=palette.bar,horiz = T, las=1,
+                   #main = "Potential years of life lost /100,000",
+                   #sub = subtitle,
+                   add = TRUE,  ## 덧그리기
+                   #args.legend = list(x="topright"),
+                   legend.text = seq.year )
+  box()
+  xaxis <- as.numeric(plotdata[,-pos.korea])
+  yaxis <- as.numeric(matval[,-pos.korea])
+  text(yaxis, xaxis, labels=yaxis, pos = 4, cex=0.7, col="darkblue")
+  kxaxis <- as.numeric(plotdata[,pos.korea])
+  kyaxis <- as.numeric(matval[,pos.korea])
+  text(kyaxis, kxaxis, labels=kyaxis, pos = 4, cex=0.7, col="red")
+}
+PYLLplot(PYLLmat(cod=list.cod[34],seq.year = seq.year))
+PYLLplot(PYLLmat(cod=list.cod[39],seq.year = c(2020,2021)))
+PYLLplot(PYLLmat(cod=list.cod[49],seq.year = seq.year))
+```

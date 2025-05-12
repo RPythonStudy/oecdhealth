@@ -1,0 +1,376 @@
+---
+title: "Data manipulation 2"
+author: "Haewon Lee"
+format: html
+editor: visual
+---
+
+# Health Status
+
+## Data load
+
+tidyverse, dplyr, magrittr 등을 사용합니다.
+
+작업할 파일들을 프로젝터 폴더에 다운로드 한 다음 시작해 주세요
+
+### Source of data : https://data-explorer.oecd.org/
+
+OECD.ELS.HD,DSD_HEALTH_STAT\@DF_C,1.0+all.csv \*\*\*\*\*\*\*\*\*\*
+
+OECD.ELS.HD,DSD_HEALTH_STAT\@DF_COM,1.0+all.csv \*\*\*\*\*\*\*\*\*\*
+
+OECD.ELS.HD,DSD_HEALTH_STAT\@DF_HEALTH_STATUS,1.0+all.csv \*\*\*\*\*\*\*\*\*\*
+
+```{r}
+library(tidyverse)
+library(dplyr)
+library(magrittr)
+```
+
+Status 라는 이름이 들어가는 화일을 읽는다. 439MB 라서 시간이 오래 걸림 - Rdata로 보관하는 방법이 있다. RData는 파일이름의 확장자를 아무것으로 해도 상관이 없다. 원래는 ".RData " 를 사용했는데.. 이것을 사용하게 되면 R Studio 작업 확장자와 같아져서 간혹 에러를 발생하는 경우가 있다. 특히 renv 설정하고 나면 Global Environment가 저장된 것으로 오해를 받는 경우가 생김 그걸피하기 위해서 ".Rda" 로 사용함
+
+RData를 사용하면 메모리를 절약할 수 있어서 큰 데이터를 사용할 때에 유리함
+
+```{r}
+file_list <- dir()
+file_list[regexpr("STATUS", file_list)>0]
+## file_list[regexpr("STATUS", file_list)>0] %>% read.csv -> status
+## save(status,file="hstatus.Rda")
+## 위의 두 줄의 명령은 한번만 실행하고 다시는 실행하지 않는다.
+load("hstatus.Rda")
+## load 명령이 훨씬 더 빠르고 용량도 적게 차지 한다. (6.3MB)
+checkvar <- function(df=status){
+  for (i in 1:length(df)) {         ## df의 변수갯수에 맞춰서
+    if(length(unique(df[,i]))>1){   ## unique value 두개이상인 것 선택
+      cat(i,")", length(unique(df[,i]))," ",colnames(df)[i],"\n") 
+      ### i) unique value 갯수  name of variable 츨력하기 
+    }
+}
+}
+checkvar2 <- function(df=status){
+  for (i in 1:length(df)) {               ## df의 변수갯수에 맞춰서
+    if(length(unique(df[,i]))==1&&        ## unique value가 1개이고
+       !( is.na(unique(df[,i]))||          ## unique value가 NA가 아니거나
+         unique(df[,i]=="Not applicable")||  ## "Not applicable" 이거나
+         unique(df[,i]=="_Z") ))              ## "_Z" 이거나 하지 않으면..   
+      {
+      cat(i,")", colnames(df)[i],":",unique(df[,i]),"\n")
+      ## i 번째 컬럼이름 :  unique value
+    }
+  }
+}
+checkvar(status)
+checkvar2(status)
+```
+
+status 데이터에는 상당히 많은 변수들이 섞여 있다. 변수명들에서 알 수 있듯이 Measure 항목이 중요할 것 같다.
+
+Measure에는 어떤 변수가 있는지 찾아보자
+
+```{r}
+status %>% .$Socio.economic.status %>% unique
+## unique values of specific variable name
+status %>% .[24] %>% unique
+## unique values of specific column
+status$Measure %>% unique
+```
+
+### Avoidable mortality
+
+이 중에서 Avoidable mortality 만 선택해서 변수들을 살펴보자
+
+데이터를 변수별로 탐색해 보면 Sex = Total로 한정하고, Unit.of.measure="Deaths per 100 000 inhabitants" 로 한정하는 것이 좋다는 것을 알 수 있다.
+
+```{r}
+status %>% .$Sex %>% unique
+status %>% .$Unit.of.measure %>% unique
+status_Am <- status[status$Measure=="Avoidable mortality"&
+                      status$Sex=="Total",]
+
+status_Am <- status[status$Measure=="Avoidable mortality",]
+
+status_Am_Total <- status[status$Measure=="Avoidable mortality"&
+                      status$Sex=="Total" &
+                      status$Unit.of.measure=="Deaths",]
+status_Am_Male <- status[status$Measure=="Avoidable mortality"&
+                      status$Sex=="Male" &
+                      status$Unit.of.measure=="Deaths",]
+
+status_Am_Female <- status[status$Measure=="Avoidable mortality"&
+                      status$Sex=="Female" &
+                      status$Unit.of.measure=="Deaths",]
+status %>% .[.$Measure==""Avoidable mortality"&
+              .$Unit.of.measure=="Deaths",]
+checkvar(status_Am)
+#### Sex만 제한해 본다
+status_Am %>% .$Unit.of.measure %>% unique
+### 변수의 종류가 좁혀지는 것을 알 수 있다.
+status_Am <- status[status$Measure=="Avoidable mortality"&
+                      status$Sex=="Total"&
+                      status$Unit.of.measure=="Deaths per 100 000 inhabitants",]
+checkvar(status_Am)
+## checkvar2(status_Am)
+## 이 변수는 무엇인지 확인
+status_Am %>% .$Observation.status %>% unique
+```
+
+Observation.status 와 Reference.area 사이에는 어떤 관계가 있을 것 같다. 이런 경우 table 함수로 pivot table을 만들어보면 된다.
+
+```{r}
+## Observation.status 와 Reference.area를 살펴본다.
+status_Am %>% .[,c("Reference.area","Observation.status")] %>%
+  table
+```
+
+이런 경우에는 Observation.status를 무시해도 좋을 것 같다.
+
+우리가 표로 제시해야할 때 사용할 수 있는 변수는 두가지 뿐이다. 대개 시각적으로 쉽게 이해 가능한 차원은 2차원이기 때문이다.
+
+여기서 제시할 도표는 국가별, 연도별 2차원으로 하도록 하자. 그렇게 하려면 나머지 변수들은 1개의 값으로 고정해야 한다. 또 어떤 변수는 여러개의 값을 갖지만 데이터 성격만 구분하는 값이어서 통합하는 것이 나을 수 있다. 이런 경우에는 그 변수를 무시하고 합치면 된다.
+
+```{r}
+status %>% .[status$Measure=="Avoidable mortality",
+             c("Reference.area","Sex","TIME_PERIOD","OBS_VALUE")] -> df_Am
+## df_Am %>% .[,c(3,2,1)] %>% table = 3차원 테이블이 만들어진다. 
+## "Reference.area","Sex","TIME_PERIOD" 3개 변수의 3차원 테이블
+df_Am %>% .[,c(3,2,1)] %>% table %>% as.data.frame -> df_table
+## "Reference.area","Sex","TIME_PERIOD" 3개 변수의 3차원 테이블을
+## Long form의 테이블로 변경
+df_table %>% head(100)## frequency value = 2 : 2개씩 중복된 값이 있다는 뜻
+checkvar(df_table)
+df_table %>% .[,c(1,2)] %>% table  ## "Sex","TIME_PERIOD" 여기서 Sex가 3가지 
+df_table %>% .[,2] %>% unique
+```
+
+따라서 처음으로 돌아가면 "Reference.area","Sex","TIME_PERIOD" 3개 변수외에 OBS_STATUS는 무시하고 데이터셋을 정리하면 된다는 것을 알 수 있다.
+
+```{r}
+status_Am <- status[status$Measure=="Avoidable mortality"&
+                      status$Sex=="Total"&
+                      status$Unit.of.measure=="Deaths per 100 000 inhabitants",]
+checkvar(status_Am)
+checkvar2(status_Am)
+```
+
+데이터를 정리해보면 중간에 결측치가 많다. 국가별 데이터를 조사하다보면 어떤 국가들은 특정 연도에 데이터를 제공하지 못하기도 한다. 원래의 작업에는 결측치를 포함시켜도 큰 문제는 없지만 결측값을 제외시키는 방법도 사용해보자.
+
+```{r}
+## status_Am[,c("Reference.area","TIME_PERIOD")] %>% table
+## 국가별로 연도가 빠진 것이 있는지 check 하지만 이것은 보기가 어렵다
+### Freq : 국가별로 연도가 빠진 것은 제외하고 테이블을 만들어본다.
+status_Am %>% .[,c("Reference.area","TIME_PERIOD")] %>% table %>%
+  as.data.frame %>% .[.$Freq>0,"TIME_PERIOD"] %>% table 
+### 똑같은 작업인데 국가를 Korea로 제한해서 테이블을 만들어본다
+status_Am %>% .[.$Reference.area=="Korea",c("Reference.area","TIME_PERIOD")] %>%
+  table %>% as.data.frame %>% .[.$Freq>0,"TIME_PERIOD"] %>% table 
+
+```
+
+연도별 \~ 국가 데이터 숫자를 보고나서 2000,2005,2010,2015,2020 이렇게 다섯개 연도를 사용하기로 했다. \*\* 2019년도가 2020년보다 데이터 제공수가 더 많지만 한국이 포함된 최신 연도를 넣기 위해서
+
+위의 다섯개 연도에서 데이터가 하나라도 제공되지 않는 나라들은 전부 제외시키도록 한다.
+
+```{r}
+2001 %>% seq(,by=5, length.out = 5) -> seq.year   ## 5년 간격으로 5개 연도
+status_Am %>% .[.$TIME_PERIOD %in% seq.year, ] %>%
+  ## 특정연도에 포함된 데이터만 선택
+  .[,c("TIME_PERIOD","Reference.area")] %>% table %>% 
+  ## 연도별, 국가별 테이블을 만들어서
+  as.data.frame %>% .[.$Freq==0,] %>% 
+  ## 빈도가 0인 것만 선택하고
+  .[,"Reference.area"] %>% unique -> excluded
+## 이 중에서 Reference.area 값을 제외데이터로 결정
+status_Am <- status_Am[,c("Reference.area","TIME_PERIOD","OBS_VALUE")]
+### status_Am 에서 이제는 세가지 필드만 사용하면 된다.
+status_Am %>% .[.$TIME_PERIOD %in% seq.year, ] %>%
+  ### 선택된 연도만 포함하고
+  .[!.$Reference.area %in% excluded,] -> status_Am
+  ### excluded에 포함된 국가는 제외
+status_Am %>% spread(key=TIME_PERIOD, value = OBS_VALUE) -> mat_Am
+### TIME_PERIOD 순서대로 wide form data로 변환한 것을 그래프용 매트릭스로 사용
+mat_Am %>% .[order(-.[,ncol(.)]),] -> mat_Am
+### ncol(.) = last column number
+## 마지막 컬럼의 데이터의 역순 (큰 숫자에서 작은 숫자 순서대로) 정렬
+## mat_Am %>% .[,-1] %>% as.matrix %>% t 
+## first column 제외한 다음 transpose
+mat_Am %>% .[,-1] %>% as.matrix %>% t -> matval
+## mat_Am$Reference.area
+colnames(matval) <- mat_Am$Reference.area
+matval %>% t
+```
+
+#### barplot 기본
+
+이제 그래프를 그려보자
+
+그래프는 국가별 사망률 barplot인데 한 국가에 연도별로 5개씩 bar가 그려지게 할 계획이고 그래프의 크기가 순서대로 그려지되 국가가 Y축에 나와야 하므로 수평방향 barplot이 되어야 한다.
+
+Barplot는 데이터가 매트릭스 형태로 받아들인다.
+
+```{r}
+matrix(1:12, nrow=4, byrow = T)
+matrix(1:12, nrow=4, byrow = T) %>% barplot
+```
+
+이렇게 그려진 그래프는 맘에 드나? 아무 옵션없이 그리면 이렇게 스택형태로 된다.
+
+```{r}
+matrix(1:12, nrow=3, byrow = T) %>% barplot(,beside = T)
+```
+
+bar에다가 색상도 추가해보자
+
+```{r}
+matrix(1:12, nrow=3, byrow = T) %>% barplot(,beside = T, col=rainbow(4))
+```
+
+색상이 뭔가 이상하다? X 축 한개당 3개씩 색상이 배정되어야 하는데 4개씩 배정되어서 어긋나 있다.
+
+```{r}
+matrix(1:12, nrow=3, byrow = T) %>% barplot(,beside = T, col=rainbow(3))
+matrix(1:12, nrow=3, byrow = T) %>% barplot(,beside = T, col=rainbow(12))
+matrix(1:12, nrow=3, byrow = T) %>% barplot(,beside = T, col=rainbow(10)[1:3])
+```
+
+#### 실제 데이터로 barplot 그려보자
+
+row의 갯수가 한 column(변수명)에 같이 그려지는 bar의 갯수와 같다. 데이터베이스를 매트릭스로 바꿔서 그래프를 그려보자.
+
+```{r}
+mat_Am %>% .[,-1] %>% as.matrix %>% barplot(beside=T)
+```
+
+국가별로 그래프가 그려져야 하는데 연도별로 그려진다. 이런 경우에는 행과 열을 바꿔야 한다. 그래서 매트릭스로 만든 다음에 transpose를 해야 한다.
+
+```{r}
+mat_Am %>% .[,-1] %>% as.matrix %>% t %>% barplot(beside=T)
+```
+
+그리고 이 그래프를 수평으로 그려지게 해보자
+
+```{r}
+mat_Am %>% .[,-1] %>% as.matrix %>% t %>% barplot(beside=T, horiz = T)
+```
+
+Reference.area 이름이 없어서 column 이름이 그냥 숫자로 나온다. 이 매트릭스에 column 이름을 붙여주자.
+
+```{r}
+mat_Am %>% .[,-1] %>% as.matrix %>% t -> matval
+colnames(matval) <- mat_Am$Reference.area
+matval %>% barplot(beside=T, horiz = T)
+```
+
+#### barplot details
+
+barplot의 옵션들에 대해서 알아보자 매우 다양한 옵션이 있다.
+
+``` r
+barplot(height, width = 1, space = NULL,
+        names.arg = NULL, legend.text = NULL, beside = FALSE,
+        horiz = FALSE, density = NULL, angle = 45,
+        col = NULL, border = par("fg"),
+        main = NULL, sub = NULL, xlab = NULL, ylab = NULL,
+        xlim = NULL, ylim = NULL, xpd = TRUE, log = "",
+        axes = TRUE, axisnames = TRUE,
+        cex.axis = par("cex.axis"), cex.names = par("cex.axis"),
+        inside = TRUE, plot = TRUE, axis.lty = 0, offset = 0,
+        add = FALSE, ann = !add && par("ann"), args.legend = NULL, ...)
+## height   either a vector or matrix of values 
+## main : main title
+## col : colors of bar
+## legend.text : legend = a vector of text
+
+## ... = other graphical parameters ?par 로 확인해보자 
+## las : style of axis labels.
+##       0:always parallel to the axis [default], 
+##       1:always horizontal, 둘다 무조건 수평
+##       2:always perpendicular to the axis, 축에 대해서 수직
+##       3:always vertical.
+```
+
+Reference.area 라벨이 수평으로 나오게 해보자 (las값 조정)
+
+```{r}
+#| fig-height: 9
+matval %>% barplot(beside=T, horiz = T, las=1)
+```
+
+그런데 Reference.area 라벨이 나올 공간이 부족하다. 이런 경우 그래프 여백값을 조정해야 한다. 또한 bar들의 색상도 연도별로 다르게 하고, grid 도 그리고, legend도 표시하게 해보자
+
+#### 기타 그래픽 옵션들
+
+``` r
+par ## 다양한 graphical parameters 를 정하거나 찾는데 사용되는 함수
+## 수십가지의 graphical parameters를 바꿀 수 있음
+par(mar= c(bottom, left, top, right) ) ## plot area의 바깥쪽 4방향 여백
+par(mai= c(bottom, left, top, right) ) ## inch 단위
+par(mfcol = c(nr, nc))  ## 그림을 여러개 한화면에 그릴 때 사용 column 순서대로
+par(mfrow = c(nr, nc))  ## 그림을 여러개 한화면에 그릴 때 사용 row 순서대로
+par(oma = c(bottom, left, top, right) ) ## 여러 그림들 배열후 외부 여백 결정
+
+axTicks ## Compute pretty tickmark locations
+axTicks(side, axp = NULL, usr = NULL, log = NULL, nintLog = NULL)
+## side 1=below, 2=left, 3=above and 4=right
+
+grid ## adds an nx by ny rectangular grid to an existing plot
+grid(nx = NULL, ny = nx, col = "lightgray", lty = "dotted",
+     lwd = par("lwd"), equilogs = TRUE)
+## nx, ny : NULL로 정하면 axTicks 값대로 그려지고 NA 면 안그려짐
+```
+
+```{r}
+#| fig-width: 8
+#| fig-height: 12
+par(mar=c(4,8,4,2)+0.1)  ## lefr margin = 8 
+palette.bar <- rainbow(20)[2:6]
+matval %>% barplot(,beside = T,col=palette.bar,horiz = T, las=1,
+                   xlim=c(0,700),
+                   main = "Avoidable mortality /100,000",
+                   axes = TRUE,
+#                   args.legend = list(x="topright"),
+                   legend.text = seq.year )  -> plotdata  ## 그래프의 좌표값
+axTicks(1) %>% length()-1 -> xtick
+grid(nx=NULL, ny=NA,col=rainbow(xtick+3)[(xtick):1])
+box()
+matval %>% barplot(,beside = T,col=palette.bar,horiz = T, las=1,
+                   xlim=c(0,700),
+                   main = "Avoidable mortality /100,000",
+                   add = TRUE,  ## 새로그리지 않고 기존의 그래프에 덧그리기
+#                   args.legend = list(x="topright"),
+                   legend.text = seq.year )
+```
+
+이제 바에다가 실제 값을 추가해보자
+
+```{r}
+#| fig-width: 8
+#| fig-height: 12
+xaxis <- as.numeric(plotdata)  ## 매트릭스 값을 1차원 벡터로 수정
+yaxis <- as.numeric(matval)    ## 매트릭스 값을 1차원 벡터로 수정
+## barplot을 horiz =T 로 그렸기 때문에 Reference.area가 x 축좌표로 간주된다.
+xaxis %>% head(20)
+yaxis %>% head(20)
+par(mar=c(4,8,4,2)+0.1)  ## lefr margin = 8 
+palette.bar <- rainbow(20)[2:6]
+matval %>% barplot(,beside = T,col=palette.bar,horiz = T, las=1,
+                   xlim=c(0,700),
+                   main = "Avoidable mortality /100,000",
+                   axes = TRUE,
+#                   args.legend = list(x="topright"),
+                   legend.text = seq.year )  -> plotdata  ## 그래프의 좌표값
+axTicks(1) %>% length()-1 -> xtick
+grid(nx=NULL, ny=NA,col=rainbow(xtick+3)[(xtick):1])
+box()
+matval %>% barplot(,beside = T,col=palette.bar,horiz = T, las=1,
+                   xlim=c(0,700),
+                   main = "Avoidable mortality /100,000",
+                   add = TRUE,  ## 새로그리지 않고 기존의 그래프에 덧그리기
+#                   args.legend = list(x="topright"),
+                   legend.text = seq.year )
+xaxis <- as.numeric(plotdata)  ## 매트릭스 값을 1차원 벡터로 수정
+yaxis <- as.numeric(matval)    ## 매트릭스 값을 1차원 벡터로 수정
+## pos option : a position specifier for the text 
+## 1,2,3,4 = below, to the left of, above and to the right
+## cex = numeric character expansion factor  1= default size
+text(yaxis, xaxis, labels=yaxis, pos = 4, cex=0.7)
+```

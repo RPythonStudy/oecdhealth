@@ -1,0 +1,110 @@
+---
+title: "long table to wide table"
+author: "Haewon Lee"
+format: html
+editor: visual
+---
+
+# Long tables
+
+long table을 한번 만들어 봅시다.
+
+10,000개의 데이터셋을 랜덤으로 만들어 봅니다.
+
+```{r}
+library(tidyverse)
+library(lubridate)
+c("B.I.Kim", "B.C.Lee","J.H.Park") %>% 
+  sample(10000, replace = T, prob = c(0.3,0.4,0.25) ) %>%
+  factor -> costumers
+OlsonNames() %>% .[regexpr(text=. ,pattern = "Seoul")>0]
+seq.days <- seq.Date(as.Date("2020-01-01", tz="Asia/Seoul"), 
+                as.Date("2024-12-31", tz="Asia/Seoul"), by="days")
+seq.days %>% 
+  sample(10000, replace = T) -> date_use
+date_use %>% as.Date(format="%Y-%m-%d") -> date_use
+
+c("Grocery","Electronics","Fashion","Education","Furniture") %>%
+  sample(10000, replace = T, prob = c(0.4,0.1,0.2,0.3,0.1) ) %>% 
+  factor -> category
+runif(10000, 8000,1200000) + rnorm(10000,70000,20000) -> 
+  money_paid
+money_paid %>% signif(3) -> money_paid
+
+longdf <- data.frame(costumers=costumers,
+                    date = date_use,
+                    category = category,
+                    amount = money_paid)
+longdf %>% str
+longdf %>% head(20)
+```
+
+사용자가 언제, 어떤 항목으로 얼마만큼의 돈을 사용하였는지.. 사용한 한건당 한개의 데이터가 생성됨
+
+사용자별로 어떤 카테고리에 얼마만큰 사용했는지 알고 싶으면 카테고리에 대해서 wide form으로 전환
+
+```{r}
+longdf %>% .[c("costumers","category","amount")] %>%
+  pivot_wider(names_from = category, 
+              values_from = amount, values_fn = sum) 
+```
+
+```{r}
+library(reshape2)
+longdf %>% dcast(costumers+ year(date) ~ category, 
+                value.var = "amount",  fun.aggregate = sum)
+```
+
+``` r
+dcast(
+  data,
+  formula,
+  fun.aggregate = NULL,
+  ...,
+  margins = NULL,
+  subset = NULL,
+  fill = NULL,
+  drop = TRUE,
+  value.var = guess_value(data)
+)
+```
+
+```{r}
+longdf %>% dcast(costumers+ category  ~ year(date), 
+                value.var = "amount",  fun.aggregate = sum)
+
+longdf %>% dcast(costumers + weekdays(date) ~ category, 
+                value.var = "amount",  fun.aggregate = sum)
+
+longdf %>% dcast(costumers+ category  ~ year(date), 
+                value.var = "amount",  fun.aggregate = mean)
+library(zoo)
+longdf %>% dcast(as.yearqtr(date) ~ costumers, 
+                value.var = "amount",  fun.aggregate = sum)
+longdf %>% dcast(as.yearmon(date) ~ costumers, 
+                value.var = "amount",  fun.aggregate = sum) %>% .[21:30,]
+```
+
+3차원 데이터로 변환
+
+```{r}
+longdf %>% acast(category  ~ year(date),
+                 value.var = "amount",  fun.aggregate = sum) %>% head
+longdf %>% acast(as.yearqtr(date) ~ category ~ costumers,
+                 value.var = "amount",  fun.aggregate = sum)
+```
+
+# Wide to long
+
+넓게 가로로 펼쳐졌던 변수를 길게 한개의 변수로 묶는 과정
+
+```{r}
+longdf %>% .[c("costumers","category","amount")] %>%
+  pivot_wider(names_from = category, 
+              values_from = amount, values_fn = sum) %>%
+  pivot_longer(cols = 2:6, names_to = "cat", values_to = "sum" )
+
+longdf %>% acast(as.yearqtr(date) ~ category ~ costumers,
+                 value.var = "amount",  fun.aggregate = sum) %>%
+  melt(value.name = "value")  %>% head(30)
+```
