@@ -1,0 +1,406 @@
+---
+title: "Survival analysis exercise"
+author: "Haewon Lee"
+date:  last-modified
+format:
+  html:
+    default-image-extension: png
+fig-dpi: 600
+knitr:
+  opts_chunk: 
+    out.width: "80%"
+execute: 
+  warning: false
+editor: visual
+---
+
+# Data load
+
+## Rdata 읽기
+
+```{r}
+load("S.rdata")
+df<-S
+library(moonBook)
+library(magrittr)
+str(df)
+mytable(death~.,data=df)
+```
+
+## Data cleaning
+
+Cell_type과 Patho 비교하여 data label 수정
+
+optype label 수정
+
+Differentiation missing value 수정
+
+```{r}
+table(df[,c("Cell_type","Patho")])
+df$Cell_type <- factor(df$Cell_type,labels = c("ADC","SQC","BAC","Others"))
+table(df[,c("Cell_type","Patho")])
+df$optype <- factor(df$optype, labels = c("Lobectomy", "S_lobectomy", "Pneumonectomy"))
+table(df$Differentiation)
+df[df$Differentiation=="#VALUE!","Differentiation"] <-"n"
+table(df$Differentiation)
+```
+
+CT size, CT solid size, Pathology size 의 관계 확인
+
+```{r}
+plot(df[,c("Ctsolid_size","CT_size")])
+plot(df[,c("CT_size","path_size")])
+```
+
+path_size와 CT_size 사용
+
+psm 모델에서는 survival period는 0 이하의 값을 가지면 안됨
+
+op mortality 때문에 생기는 문제 - op mortality를 케이스에서 제거하거나 1을 전부 더해서 해결
+
+```{r}
+table(df$survival==0)
+table(df$survival<0)
+df$survival <- df$survival+1
+```
+
+Nstage는 숫자가 아닌 factor로 변경 (연속변수가 아님)
+
+```{r}
+df$Nstage <- factor(df$Nstage)
+```
+
+Adj_RT, adj_CT 는 factor로 변경, NeoAdj, VATS도 factor
+
+```{r}
+df$Adj_RT <- factor(df$Adj_RT, labels = c("No","Yes"))
+df$adj_CT <- factor(df$adj_CT, labels = c("No","Yes"))
+df$NeoAdj <- factor(df$NeoAdj, labels = c("No","Yes"))
+df$VATS   <- factor(df$VATS, labels = c("No","Yes"))
+```
+
+## 생존분석에 사용할 변수들 선택
+
+```{r}
+library(rms)
+mytable(death~.,data=df)
+attach(df)
+dd <- datadist(Sex,OpAge,NeoAdj,optype,VATS,CT_size,path_size,Cell_type,
+               Tstage,Nstage,Mstage,Differentiation,Adj_RT,adj_CT,stage)
+dd
+options(datadist='dd')
+options(na.action="na.delete")
+```
+
+### Generate survival time variable
+
+```{r}
+years <- survival/365.2422*12
+years.r <- rec_free/365.2422*12
+units(years) <- "Year"
+```
+
+### S라는 survival 객체를 만들어서 작업, R = recurrence free survival
+
+```{r}
+S<- Surv(years,death)
+R<- Surv(years.r, recurrence)
+
+head(R,40)
+head(S,40)
+```
+
+## Cox PH 모델 만들어 보기
+
+```{r}
+fit.cph <- cph(S~Sex+OpAge+NeoAdj+optype+VATS+CT_size+path_size+Cell_type+
+               Tstage+Nstage+Mstage+Differentiation+Adj_RT+adj_CT+stage,
+               method = "efron", x=TRUE, y=TRUE, surv=TRUE, se.fit = TRUE)
+fit.cph
+```
+
+error : X matrix deemed to be singular; variable stage=Stage IV
+
+stage variable이 Tstage+Nstage+Mstage 조합이라서 발생하는 문제로 추정됨 stage 제거
+
+```{r}
+#| fig-width: 6
+#| fig-height: 6
+fit.cph <- cph(S~Sex+OpAge+NeoAdj+optype+VATS+CT_size+path_size+Cell_type+
+               Tstage+Nstage+Mstage+Differentiation+Adj_RT+adj_CT,
+               method = "efron", x=TRUE, y=TRUE, surv=TRUE, se.fit = TRUE)
+fit.cph
+anova(fit.cph)
+anova(fit.cph) %>% plot
+```
+
+spearman graph
+
+```{r}
+#| fig-width: 6
+#| fig-height: 6
+w<- spearman2(years~Sex+OpAge+NeoAdj+optype+VATS+CT_size+path_size+Cell_type+
+                Tstage+Nstage+Mstage+Differentiation+Adj_RT+adj_CT)
+plot(w)
+```
+
+### forest plot
+
+forest plot을 그리려면 rms package의 cph는 지원하지 않으므로 survival package의 coxph를 사용한다.
+
+```{r}
+#| fig-width: 8
+#| fig-height: 12
+library(survival)
+library(ggplot2)
+library(survminer)
+fit.coxph<- coxph(S~Sex+OpAge+NeoAdj+optype+VATS+CT_size+path_size+Cell_type+
+           Tstage+Nstage+Mstage+Differentiation+Adj_RT+adj_CT)
+anova(fit.coxph)
+summary(fit.coxph)
+ggforest(fit.coxph, data=df)
+```
+
+## PSM model 만들기
+
+```{r}
+#| fig-width: 6
+#| fig-height: 6
+fit.psm <- psm(S~Sex+OpAge+NeoAdj+optype+VATS+CT_size+path_size+Cell_type+
+                 Tstage+Nstage+Mstage+Differentiation+Adj_RT+adj_CT)
+fit.psm
+anova(fit.psm)
+plot(anova(fit.psm))
+```
+
++-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+| psm                                                                                                                                                                                                   |
++=======================================================================================================================================================================================================+
+| psm(formula, data=environment(formula), weights, subset, na.action=na.delete, dist="weibull", init=NULL, scale=0, control=survreg.control(), parms=NULL, model=FALSE, x=FALSE, y=TRUE, time.inc, ...) |
++-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+| weight                                                                                                                                                                                                |
++-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+| dist : 생존함수 추정분포 "weibull", "exponential", "gaussian", "logistic","lognormal" "loglogistic"                                                                                                   |
+|                                                                                                                                                                                                       |
+| psm에서는 weibull 사용                                                                                                                                                                                |
++-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+| control : survreg.control() value (maximum iteration 30, relative tollerance 0.09, outer.max 10)                                                                                                      |
++-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+| model : model frame을 결과값에 포함, x,y = survplot, residual 등에 사용되는 Surv matrix 포함                                                                                                          |
++-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+
+: psm function
+
+### 특정변수에 대한 모델 만들기
+
+age와 같은 특정변수에 대한 모델 만들기
+
+```{r}
+#| fig-width: 6
+#| fig-height: 8
+fit.age <- psm(S~rcs(OpAge,5))
+survplot(fit.age, col=rainbow(10)[5:10])
+survplot(fit.age, logt = T,loglog = T , col=rainbow(10)[5:10])
+```
+
+```{r}
+#| fig-width: 6
+#| fig-height: 6
+fit.t <- psm(S~Tstage)
+survplot(fit.t,  col=rainbow(10)[1:6])
+```
+
+```{r}
+#| fig-width: 6
+#| fig-height: 6
+fit.n <- psm(S~Nstage)
+survplot(fit.n,  col=rainbow(10)[1:6])
+```
+
+연속변수에 대한 rcs 적용
+
+```{r}
+#| fig-width: 6
+#| fig-height: 6
+fit.psm2 <- psm(S~Sex+rcs(OpAge,5)+NeoAdj+optype+VATS+rcs(CT_size,5)+
+                  rcs(path_size,5)+Cell_type+Tstage+Nstage+Mstage+
+                  Differentiation+Adj_RT+adj_CT, 
+                x=TRUE, y=TRUE)
+fit.psm2
+plot(anova(fit.psm2))
+```
+
+각각의 변수에 대한 Predict 함수 그래프
+
+```{r}
+#| fig-width: 6
+#| fig-height: 6
+plot(Predict(fit.psm2,OpAge))
+plot(Predict(fit.psm2,CT_size))
+plot(Predict(fit.psm2,path_size))
+plot(Predict(fit.psm2,Tstage))
+plot(Predict(fit.psm2,Nstage))
+plot(Predict(fit.psm2,Mstage))
+```
+
+### ggplot predict graph
+
+```{r}
+#| fig-width: 8
+#| fig-height: 8
+a<- anova(fit.psm2)
+ggplot(Predict(fit.psm2, ref.zero = T), vnames = "names",
+       sepdiscrete = "vertical", anova = a)
+```
+
+### forest plot for psm model
+
+```{r}
+#| fig-width: 10
+#| fig-height: 12
+# summary(fit.psm2)
+plot(summary(fit.psm2))
+```
+
+깔끔한 forestplot 을 그리려면 ormPlot package가 필요하다
+
+```{r}
+#| fig-width: 10
+#| fig-height: 12
+library(ormPlot)
+forestplot(summary(fit.psm2))
+```
+
+## Validate
+
+### fit 모델을 검정하는 과정
+
+```{r}
+validate(fit.psm2, method = "boot", B=200, type="residual")
+fpsm.val <- validate(fit.psm2, method = "boot", B=200, type="residual")
+```
+
++----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+| validate                                                                                                                                                                                                                         |
++==================================================================================================================================================================================================================================+
+| validate(fit, method="boot", B=40, bw=FALSE, rule="aic", type="residual", sls=0.05, aics=0, force=NULL, estimates=TRUE, pr=FALSE, ...)                                                                                           |
++----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+| fit : model, B = repetition : crossvalidation의 경우에는 그룹으로 나누는 수                                                                                                                                                      |
++----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+| method in "crossvalidation", "boot", ".632", "randomization" - can be abbreviate                                                                                                                                                 |
++----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+| bw : TRUE to do fast step-down                                                                                                                                                                                                   |
+|                                                                                                                                                                                                                                  |
+| rule : bw가 TRUE인 경우 stopping rule "aic" (Akaike's information criterion) or "p" (p-value)                                                                                                                                    |
++----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+| a matrix with rows corresponding to the statistical indexes                                                                                                                                                                      |
+|                                                                                                                                                                                                                                  |
+| columns for columns for the original index, resample estimates, indexes applied to the whole or omitted sample using the model derived from the resample, average optimism, corrected index, and number of successful re-samples |
++----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+
+: validate function
+
+### C-index from Dxy
+
+$$
+D_{xy} = 2 \times (C-0.5) \rightarrow C = \frac{D_{xy}}{2} + 0.5
+$$
+
+```{r}
+fpsm.val[1,5]/2 +0.5  ## corrected index of Dxy
+```
+
+## Residuals
+
+```{r}
+#| fig-width: 6
+#| fig-height: 6
+pcolor <- rgb(0.8,0,0,0.2)
+plot(residuals(fit.psm2, type = "censored.normalized"), col="blue")
+plot(residuals(fit.psm2, type = "response"), col=pcolor, pch=15)
+plot(residuals(fit.psm2, type = "deviance"), col=pcolor, pch=15)
+plot(residuals(fit.psm2, type = "working"), col=pcolor, pch=15)
+plot(residuals(fit.psm2, type = "matrix"), col=pcolor, pch=15)
+```
+
+### calibration
+
+```{r}
+cal5 <- calibrate(fit.psm2,u=5, B=300)
+plot(cal5)
+cal.k5 <- calibrate(fit.psm2,cmethod = "KM",u=5, m=60, B=120, pr=FALSE)
+plot(cal.k5,add=TRUE)
+
+cal1 <- calibrate(fit.psm2,u=1, B=300)
+plot(cal1)
+cal.k1 <- calibrate(fit.psm2,cmethod = "KM",u=1, m=60, B=120, pr=FALSE)
+plot(cal.k1,add=TRUE)
+```
+
+## Nomogram 그리기
+
+```{r}
+#| fig-width: 9
+#| fig-height: 12
+nomogram(fit.psm2, fun = function(x){1/(1+exp(-x))})
+plot(nomogram(fit.psm2))
+```
+
+| nomogram |
+|----|
+| nomogram(fit, ..., adj.to, lp=TRUE, lp.at=NULL, fun=NULL, fun.at=NULL, fun.lp.at=NULL, funlabel="Predicted Value", interact=NULL, kint=NULL, conf.int=FALSE, conf.lp=c("representative", "all", "none"), est.all=TRUE, posterior.summary=c('mean', 'median', 'mode'), abbrev=FALSE, minlength=4, maxscale=100, nint=10, vnames=c("labels","names"), varname.label=TRUE, varname.label.sep="=", omit=NULL, verbose=FALSE) |
+|  |
+|  |
+
+: nomogram function
+
+### the function "Function"
+
+R function analytic representation of $X\hat\beta$ from a fitted regression model
+
+```{r}
+Function(fit.psm2)
+g <- Function(fit.psm2)
+g(OpAge=70, Tstage = "1a")
+```
+
+### Nomogram with expected survival
+
+```{r}
+#| fig-width: 9
+#| fig-height: 12
+expected.surv <- Mean(fit.psm2)
+quantile.surv <- Quantile(fit.psm2)
+expected.surv
+median.surv <- function(x) quantile.surv(lp=x)
+nom.fpsm <- nomogram(fit.psm2,
+                     fun=list("Median Survival Time"=median.surv,
+                              "Mean Survival Time"=expected.surv),
+                     fun.at=c(.1,.25,.5,1,2,5,10,20))
+plot(nom.fpsm)
+```
+
+```{r}
+#| fig-width: 12
+#| fig-height: 12
+surv <- Survival(fit.psm2)
+surv3 <- function(x) surv(3, lp=x)
+surv5 <- function(x) surv(5, lp=x)
+ss <- c(0.05,seq(0.1,0.9,by=0.1),0.95)
+nom2 <- nomogram(fit.psm2,
+        fun = list(surv3,surv5,median.surv),
+        funlabel = c("3-year survival", "5-year survival","Median Survival(years"),
+        fun.at = list(ss,ss,c(0.5,1:10))
+        )
+plot(nom2)
+```
+
+Function으로 $X\hat\beta$ 를 구한 다음에 Survival 함수로 생존율을 예측할 수 있다.
+
+```{r}
+### g <- Function(fit.psm2)
+### surv3 <- function(x) surv(3, lp=x)
+### surv <- Survival(fit.psm2) surv(times, lp, parms)
+g(OpAge=50, Tstage = "3",Nstage = "2") %>% surv3()
+surv(1:5, g(OpAge=50, Tstage = "3"))
+```
